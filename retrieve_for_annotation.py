@@ -38,7 +38,7 @@ def retrieve(queries, texts, doc_ids, embeddings_queries, embeddings_docs, top_k
         similarity = (embeddings_queries @ embeddings_docs.T) * 100
     else:
         raise ValueError(f"Invalid similarity type: {sim_type}")
-    print("similarity", similarity)   # [[0.6265, 0.3477], [0.3499, 0.678 ]]
+    # print("similarity", similarity)   # [[0.6265, 0.3477], [0.3499, 0.678 ]]
     
     similarity_dict = {}
     for i in range(len(queries)):
@@ -47,7 +47,8 @@ def retrieve(queries, texts, doc_ids, embeddings_queries, embeddings_docs, top_k
         # Cut similarity scores to top_k results
         similarity_dict[queries[i]] = similarity_dict[queries[i]][:top_k]
         # Fill similarity_dict with the documents (for each query)
-        # similarity_dict will be a dict with query as key and a list of the document texts as value
+        # similarity_dict will be a dict with query as key and a list of
+        # tuples of (similarity, document text, doc_id) as value
         for j, (doc_i, doc_sim) in enumerate(similarity_dict[queries[i]]):
             similarity_dict[queries[i]][j] += tuple([texts[doc_i], doc_ids[doc_i]])
 
@@ -62,8 +63,6 @@ def embed_jinja(model, docs, queries, top_k=10):
     # 'retrieval.query', 'retrieval.passage', 'separation', 'classification', 'text-matching'
     # Alternatively, you can choose not to pass a `task`, and no specific LoRA adapter will be used.
     embeddings_queries = model.encode(queries, task="retrieval.query", max_length=MAX_QUERY_LEN)
-    print("type docs inside embed jinja", type(docs))
-    print("docs", docs)
     path = 'corpus/embeddings_corpus_jinja.npy'
 
     if not os.path.exists(path):
@@ -87,7 +86,6 @@ def embed_bge(model, docs, queries, top_k=10):
     Embed the queries and documents using the BAAI embeddings models and compute the similarity between queries and documents.
     """
     embeddings_queries = model.encode(queries, batch_size=2, max_length=MAX_QUERY_LEN)['dense_vecs']
-    print("type docs inside embed", type(docs))
     # Embed entire corpus if file does not exist
     path = 'corpus/embeddings_corpus_bge-m3.npy'
     if not os.path.exists(path):
@@ -103,6 +101,37 @@ def embed_bge(model, docs, queries, top_k=10):
     doc_ids = list(docs.keys())
     texts = list(docs.values())
     similarity_dict = retrieve(queries, texts, doc_ids, embeddings_queries, embeddings_docs, top_k)
+    return similarity_dict
+
+
+def embed_bm25(docs, queries, doc_ids, top_k=10):
+    from rank_bm25 import BM25Okapi
+    import numpy as np
+
+    texts = list(docs.values())
+
+    # Simple space-based tokenization
+    tokenized_corpus = [text.lower().split() for text in texts]
+
+    # Create BM25 model
+    bm25 = BM25Okapi(tokenized_corpus)
+
+    # Queries
+    tokenized_queries = [query.lower().split() for query in queries]
+
+    # key: query, value: (similarity, text, doc_id)
+    similarity_dict = {}
+    for tokenized_query, query in zip(tokenized_queries, queries):
+        similarity_dict[query] = []
+        
+        # Calcular las puntuaciones BM25 para la consulta en cada documento
+        scores = bm25.get_scores(tokenized_query)
+
+        # Ordenar los documentos por relevancia
+        sorted_docs = np.argsort(scores)[::-1]  # Orden descendente
+        for idx in sorted_docs[:top_k]:
+            value = (idx, scores[idx], texts[idx], doc_ids[idx])
+            similarity_dict[query].append(value)
     return similarity_dict
 
 
@@ -126,22 +155,22 @@ def main():
 
     torch.cuda.empty_cache()
 
+    # I want 30 annotated documents for each query
+    top_k = 30
+
     docs = get_docs('corpus/corpus_google_min_line_len2_naive.csv')
-    print("type of docs", type(docs))
     # assert len of texts is 5000
-    # assert len(texts) == 5000
+    assert len(docs) == 5000
 
     queries_path = 'corpus/queries_57.csv'
     queries = pd.read_csv(queries_path)["Consultas"].tolist()
     # assert len of queries is 57
-    print("QUeries\n", queries)
     assert len(queries) == 57
 
     models = [
+        "bm25",
         "bge-m3",
-        # "E5",
         "Jinja",
-        # "gemma2",
     ]
 
     device = torch.device("cuda")
@@ -150,27 +179,20 @@ def main():
 
         print(f"Retrieving documents using {model_name} model...")
         
-        if model_name == "bge-m3":
+        if model_name == "bm25":
+            doc_ids = list(docs.keys())
+            similarity_dict = embed_bm25(docs, queries, doc_ids, top_k)
+        elif model_name == "bge-m3":
             checkpoint = 'BAAI/bge-m3'
             # checkpoint = 'BAAI/bge-m3-unsupervised'
             # checkpoint = 'BAAI/bge-m3-retromae'
             model = get_bge_m3_model(checkpoint)
-            similarity_dict = embed_bge(model, docs, queries, top_k=10)
-        
-        elif model_name == "gemma2":
-            model = get_gemma2_model()
-            similarity_dict = embed_gemma2(model, docs, queries, top_k=10)
-        
-        elif model_name == "E5":
-            # Has max sequence length of 512
-            model, tokenizer_e5 = get_e5_model()
-            model.to(device)
-            similarity_dict = embed_e5(model, docs, queries, top_k=10, tokenizer=tokenizer_e5)
+            similarity_dict = embed_bge(model, docs, queries, top_k)
 
         elif model_name == "Jinja":
             model = get_jinja_model()
             model.to(device)
-            similarity_dict = embed_jinja(model, docs, queries, top_k=10)
+            similarity_dict = embed_jinja(model, docs, queries, top_k)
         
         else:
             raise ValueError(f"Invalid model name: {model_name}")
