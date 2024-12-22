@@ -163,7 +163,7 @@ def main():
     assert len(docs) == 5000
 
     queries_path = 'corpus/queries_57.csv'
-    queries = pd.read_csv(queries_path)["Consultas"].tolist()
+    queries = pd.read_csv(queries_path)["Query"].tolist()
     # assert len of queries is 57
     assert len(queries) == 57
 
