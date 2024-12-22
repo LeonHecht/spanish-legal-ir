@@ -13,7 +13,7 @@ def read_retrieved_docs(path):
 
 def get_queries():
     queries_path = 'corpus/queries_57.csv'
-    queries = pd.read_csv(queries_path)["Consultas"].tolist()
+    queries = pd.read_csv(queries_path)["Query"].tolist()
     # assert len of queries is 57
     assert len(queries) == 57
     return queries
