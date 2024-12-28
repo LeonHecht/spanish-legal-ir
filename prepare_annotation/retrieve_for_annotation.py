@@ -1,3 +1,9 @@
+"""
+This script is used to retrieve documents for annotation using different embeddings models and BM25.
+It retrieves the top_k most similar documents for each query and saves the query-top_k document pairs to a CSV file.
+The embeddings models used are Jinja and BAAI embeddings models.
+"""
+
 import pandas as pd
 import numpy as np
 import os
@@ -8,8 +14,15 @@ MAX_DOC_LEN = 4096
 
 
 def get_docs(path):
-    """Result is a dictionary with document_id as key and text as value.
-       Example: {'1': 'text1', '2': 'text2', ...}
+    """ Get all the documents of the corpus and their doc_id (Codigo).
+        Result is a dictionary with document_id as key and text as value.
+        Example: {'492385': 'text1', '684933': 'text2', ...}
+
+    Args:
+        path (str): Path to the CSV file with the corpus.
+
+    Returns:
+        dict: Dictionary with document_id as key and text as value.
     """
     df = pd.read_csv(path)
     doc_ids = df['Codigo'].tolist()
@@ -26,6 +39,19 @@ def retrieve(queries, texts, doc_ids, embeddings_queries, embeddings_docs, top_k
     """
     Given a list of queries and documents, and their embeddings, compute the similarity between queries and documents
     and return the top_k most similar documents for each query.
+    Dot-product and cosine similarity are supported.
+
+    Args:
+        queries (list): List of queries.
+        texts (list): List of documents.
+        doc_ids (list): List of document IDs (Codigos).
+        embeddings_queries (np.ndarray): Embeddings of queries.
+        embeddings_docs (np.ndarray): Embeddings of documents.
+        top_k (int): Number of most similar documents to retrieve.
+        sim_type (str): Type of similarity to use. Options: 'dot', 'cosine'.
+    
+    Returns:
+        dict: Dictionary with query as key and a list of tuples of (similarity, document text, doc_id) as value.
     """
     import torch.nn.functional as F
     
@@ -58,6 +84,16 @@ def retrieve(queries, texts, doc_ids, embeddings_queries, embeddings_docs, top_k
 def embed_jinja(model, docs, queries, top_k=10):
     """
     Embed the queries and documents using the Jinja embeddings model and compute the similarity between queries and documents.
+    Calls the retrieve function.
+
+    Args:
+        model: Jinja embeddings model.
+        docs (dict): Dictionary with document_id as key and text as value.
+        queries (list): List of queries.
+        top_k (int): Number of most similar documents to retrieve.
+    
+    Returns:
+        dict: Dictionary with query as key and a list of tuples of (similarity, document text, doc_id) as value.
     """
     # When calling the `encode` function, you can choose a `task` based on the use case:
     # 'retrieval.query', 'retrieval.passage', 'separation', 'classification', 'text-matching'
@@ -84,6 +120,16 @@ def embed_jinja(model, docs, queries, top_k=10):
 def embed_bge(model, docs, queries, top_k=10):
     """
     Embed the queries and documents using the BAAI embeddings models and compute the similarity between queries and documents.
+    Calls the retrieve function.
+
+    Args:
+        model: BAAI embeddings model.
+        docs (dict): Dictionary with document_id as key and text as value.
+        queries (list): List of queries.
+        top_k (int): Number of most similar documents to retrieve.
+
+    Returns:   
+        dict: Dictionary with query as key and a list of tuples of (similarity, document text, doc_id) as value.
     """
     embeddings_queries = model.encode(queries, batch_size=2, max_length=MAX_QUERY_LEN)['dense_vecs']
     # Embed entire corpus if file does not exist
@@ -105,6 +151,18 @@ def embed_bge(model, docs, queries, top_k=10):
 
 
 def embed_bm25(docs, queries, doc_ids, top_k=10):
+    """
+    Embed the queries and documents using the BM25 model and compute the similarity between queries and documents.
+
+    Args:
+        docs (dict): Dictionary with document_id as key and text as value.
+        queries (list): List of queries.
+        doc_ids (list): List of document IDs (Codigos).
+        top_k (int): Number of most similar documents to retrieve.
+
+    Returns:
+        dict: Dictionary with query as key and a list of tuples of (similarity, document text, doc_id) as value.
+    """
     from rank_bm25 import BM25Okapi
     import numpy as np
 
@@ -136,12 +194,14 @@ def embed_bm25(docs, queries, doc_ids, top_k=10):
 
 
 def get_jinja_model():
+    """ Load Jinja embeddings model."""
     from transformers import AutoModel
     model = AutoModel.from_pretrained("jinaai/jina-embeddings-v3", trust_remote_code=True)
     return model
 
 
 def get_bge_m3_model(checkpoint):
+    """ Load BAAI embeddings model."""
     from FlagEmbedding import BGEM3FlagModel
 
     # model = BGEM3FlagModel(checkpoint, use_fp16=True) # Setting use_fp16 to True speeds up computation with a slight performance degradation
@@ -150,6 +210,19 @@ def get_bge_m3_model(checkpoint):
 
 
 def main():
+    """
+    Output is a df (CSV file) with the following columns:
+    - Query
+    - doc_sim
+    - Codigo
+    - doc_text
+
+    Example output:
+    Query,doc_sim,Codigo,doc_text
+    What is AI?,0.6265,492385,Artificial Intelligence (AI) is a branch of computer science [...] tasks that typically require human intelligence.
+
+    For all the Queries in the queries_57.csv file, the top 30 most similar documents are retrieved using the BM25, BAAI and Jinja models.
+    """
     from tqdm import tqdm
     import torch
 
